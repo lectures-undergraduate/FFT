@@ -1,0 +1,15 @@
+# Executables and object files
+*.exe
+*.o
+*.obj
+
+# Vivado Simulator generated files
+xsim.dir/
+*.log
+*.jou
+*.pb
+*.wdb
+tr_db.log
+
+# Simulation temporary outputs
+rtl_output.hex
