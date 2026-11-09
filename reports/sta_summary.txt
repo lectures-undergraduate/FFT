@@ -1,0 +1,6 @@
+Target Device: xc7z020clg400-1 (Zybo Z7-20)
+Top Module: axi_fft_top
+Clock Period Constraint: 6.666 ns
+WNS (Setup Slack): -0.733 ns
+WHS (Hold Slack):  0.046 ns
+Fmax (Max Processing Clock): 135.15339910798755 MHz

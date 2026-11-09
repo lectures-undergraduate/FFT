@@ -1,0 +1,4 @@
+all:
+{
+    submission/4_Boot_Artifacts/axi_fft_zynq.bit
+}

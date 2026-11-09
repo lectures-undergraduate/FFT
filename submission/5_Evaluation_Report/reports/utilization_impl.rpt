@@ -1,0 +1,80 @@
+Copyright 1986-2022 Xilinx, Inc. All Rights Reserved. Copyright 2022-2023 Advanced Micro Devices, Inc. All Rights Reserved.
+---------------------------------------------------------------------------------------------------------------------------------------------
+| Tool Version : Vivado v.2023.2 (win64) Build 4029153 Fri Oct 13 20:14:34 MDT 2023
+| Date         : Mon Nov  9 11:30:06 2026
+| Host         : DESKTOP-D1BDUE3 running 64-bit major release  (build 9200)
+| Command      : report_utilization -file reports/utilization_impl.rpt -hierarchical
+| Design       : axi_fft_top
+| Device       : xc7z020clg400-1
+| Speed File   : -1
+| Design State : Routed
+---------------------------------------------------------------------------------------------------------------------------------------------
+
+Utilization Design Information
+
+Table of Contents
+-----------------
+1. Utilization by Hierarchy
+
+1. Utilization by Hierarchy
+---------------------------
+
++------------------------------+------------------------------+------------+------------+---------+------+------+--------+--------+------------+
+|           Instance           |            Module            | Total LUTs | Logic LUTs | LUTRAMs | SRLs |  FFs | RAMB36 | RAMB18 | DSP Blocks |
++------------------------------+------------------------------+------------+------------+---------+------+------+--------+--------+------------+
+| axi_fft_top                  |                        (top) |       6936 |       4484 |    1408 | 1044 | 1828 |      0 |      0 |         16 |
+|   (axi_fft_top)              |                        (top) |         16 |         16 |       0 |    0 |   49 |      0 |      0 |          0 |
+|   u_bit_reverse              |           bit_reverse_buffer |       1830 |        422 |    1408 |    0 |  127 |      0 |      0 |          0 |
+|   u_out_skid                 |             axis_skid_buffer |         59 |         59 |       0 |    0 |   88 |      0 |      0 |          0 |
+|   u_r22sdf_core              |                  r22sdf_core |       5032 |       3988 |       0 | 1044 | 1564 |      0 |      0 |         16 |
+|     u_pair0                  |                  r22sdf_pair |       1825 |       1056 |       0 |  769 |  352 |      0 |      0 |          4 |
+|       (u_pair0)              |                  r22sdf_pair |          2 |          1 |       0 |    1 |   34 |      0 |      0 |          0 |
+|       gen_mult.u_cmult       |               complex_mult_4 |        149 |        149 |       0 |    0 |   72 |      0 |      0 |          4 |
+|       gen_mult.u_twiddle_rom |                twiddle_rom_5 |        257 |        257 |       0 |    0 |    2 |      0 |      0 |          0 |
+|       u_bf2i                 |                  r22sdf_bf2i |        971 |        459 |       0 |  512 |  119 |      0 |      0 |          0 |
+|         (u_bf2i)             |                  r22sdf_bf2i |        186 |        186 |       0 |    0 |   55 |      0 |      0 |          0 |
+|         u_delay              |                 delay_buffer |        787 |        275 |       0 |  512 |   64 |      0 |      0 |          0 |
+|       u_bf2ii                |                 r22sdf_bf2ii |        448 |        192 |       0 |  256 |  125 |      0 |      0 |          0 |
+|         (u_bf2ii)            |                 r22sdf_bf2ii |         61 |         61 |       0 |    0 |   93 |      0 |      0 |          0 |
+|         u_delay              | delay_buffer__parameterized0 |        387 |        131 |       0 |  256 |   32 |      0 |      0 |          0 |
+|     u_pair1                  |  r22sdf_pair__parameterized0 |       1041 |        848 |       0 |  193 |  311 |      0 |      0 |          4 |
+|       (u_pair1)              |  r22sdf_pair__parameterized0 |          2 |          1 |       0 |    1 |   34 |      0 |      0 |          0 |
+|       gen_mult.u_cmult       |               complex_mult_2 |        148 |        148 |       0 |    0 |   73 |      0 |      0 |          4 |
+|       gen_mult.u_twiddle_rom |                twiddle_rom_3 |         68 |         68 |       0 |    0 |    2 |      0 |      0 |          0 |
+|       u_bf2i                 |  r22sdf_bf2i__parameterized0 |        565 |        437 |       0 |  128 |   83 |      0 |      0 |          0 |
+|         (u_bf2i)             |  r22sdf_bf2i__parameterized0 |        185 |        185 |       0 |    0 |   51 |      0 |      0 |          0 |
+|         u_delay              | delay_buffer__parameterized1 |        382 |        254 |       0 |  128 |   32 |      0 |      0 |          0 |
+|       u_bf2ii                | r22sdf_bf2ii__parameterized0 |        258 |        194 |       0 |   64 |  119 |      0 |      0 |          0 |
+|         (u_bf2ii)            | r22sdf_bf2ii__parameterized0 |         63 |         63 |       0 |    0 |   87 |      0 |      0 |          0 |
+|         u_delay              | delay_buffer__parameterized2 |        195 |        131 |       0 |   64 |   32 |      0 |      0 |          0 |
+|     u_pair2                  |  r22sdf_pair__parameterized1 |        813 |        764 |       0 |   49 |  374 |      0 |      0 |          4 |
+|       (u_pair2)              |  r22sdf_pair__parameterized1 |          2 |          1 |       0 |    1 |   37 |      0 |      0 |          0 |
+|       gen_mult.u_cmult       |               complex_mult_0 |        120 |        120 |       0 |    0 |   72 |      0 |      0 |          4 |
+|       gen_mult.u_twiddle_rom |                twiddle_rom_1 |         31 |         31 |       0 |    0 |    0 |      0 |      0 |          0 |
+|       u_bf2i                 |  r22sdf_bf2i__parameterized1 |        467 |        435 |       0 |   32 |  131 |      0 |      0 |          0 |
+|         (u_bf2i)             |  r22sdf_bf2i__parameterized1 |        183 |        183 |       0 |    0 |   47 |      0 |      0 |          0 |
+|         u_delay              | delay_buffer__parameterized3 |        284 |        252 |       0 |   32 |   84 |      0 |      0 |          0 |
+|       u_bf2ii                | r22sdf_bf2ii__parameterized1 |        194 |        178 |       0 |   16 |  134 |      0 |      0 |          0 |
+|         (u_bf2ii)            | r22sdf_bf2ii__parameterized1 |         67 |         67 |       0 |    0 |   52 |      0 |      0 |          0 |
+|         u_delay              | delay_buffer__parameterized4 |        127 |        111 |       0 |   16 |   82 |      0 |      0 |          0 |
+|     u_pair3                  |  r22sdf_pair__parameterized2 |        819 |        786 |       0 |   33 |  355 |      0 |      0 |          4 |
+|       (u_pair3)              |  r22sdf_pair__parameterized2 |          2 |          1 |       0 |    1 |   34 |      0 |      0 |          0 |
+|       gen_mult.u_cmult       |                 complex_mult |        120 |        120 |       0 |    0 |   72 |      0 |      0 |          4 |
+|       gen_mult.u_twiddle_rom |                  twiddle_rom |         12 |         12 |       0 |    0 |   28 |      0 |      0 |          0 |
+|       u_bf2i                 |  r22sdf_bf2i__parameterized2 |        449 |        433 |       0 |   16 |   92 |      0 |      0 |          0 |
+|         (u_bf2i)             |  r22sdf_bf2i__parameterized2 |        185 |        185 |       0 |    0 |   42 |      0 |      0 |          0 |
+|         u_delay              | delay_buffer__parameterized5 |        264 |        248 |       0 |   16 |   50 |      0 |      0 |          0 |
+|       u_bf2ii                | r22sdf_bf2ii__parameterized2 |        236 |        220 |       0 |   16 |  129 |      0 |      0 |          0 |
+|         (u_bf2ii)            | r22sdf_bf2ii__parameterized2 |         69 |         69 |       0 |    0 |   45 |      0 |      0 |          0 |
+|         u_delay              | delay_buffer__parameterized6 |        167 |        151 |       0 |   16 |   84 |      0 |      0 |          0 |
+|     u_pair4                  |  r22sdf_pair__parameterized3 |        590 |        590 |       0 |    0 |  172 |      0 |      0 |          0 |
+|       u_bf2i                 |  r22sdf_bf2i__parameterized3 |        432 |        432 |       0 |    0 |  102 |      0 |      0 |          0 |
+|         (u_bf2i)             |  r22sdf_bf2i__parameterized3 |        184 |        184 |       0 |    0 |   38 |      0 |      0 |          0 |
+|         u_delay              | delay_buffer__parameterized7 |        248 |        248 |       0 |    0 |   64 |      0 |      0 |          0 |
+|       u_bf2ii                | r22sdf_bf2ii__parameterized3 |        159 |        159 |       0 |    0 |   70 |      0 |      0 |          0 |
+|         (u_bf2ii)            | r22sdf_bf2ii__parameterized3 |          8 |          8 |       0 |    0 |   38 |      0 |      0 |          0 |
+|         u_delay              | delay_buffer__parameterized8 |        151 |        151 |       0 |    0 |   32 |      0 |      0 |          0 |
++------------------------------+------------------------------+------------+------------+---------+------+------+--------+--------+------------+
+* Note: The sum of lower-level cells may be larger than their parent cells total, due to cross-hierarchy LUT combining
+
+

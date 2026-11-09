@@ -1,7 +1,8 @@
 `timescale 1ns / 1ps
 
 // Ping-Pong Bit-Reversal Buffer for Continuous 100% Throughput
-// Reorders Bit-reversed output from R2^2SDF Core into Natural Order (k = 0..1023)
+// Reorders Bit-reversed output from R2^2SDF Core into Natural Order (k = 0..N-1)
+// Infers true dual-port / simple dual-port Block RAM (RAMB36E1)
 // Generates xk_index (tuser) and frame boundary (tlast) for AXI DMA S2MM.
 module bit_reverse_buffer #(
     parameter DATA_WIDTH = 32, // 16-bit Imag + 16-bit Real
@@ -11,6 +12,7 @@ module bit_reverse_buffer #(
     input  wire                  clk,
     input  wire                  rst_n,
     input  wire                  clk_en,
+    input  wire [3:0]            cfg_nfft,  // 6: 64, 8: 256, 10: 1024
     
     // Core input (Bit-reversed stream)
     input  wire                  core_valid,
@@ -19,22 +21,29 @@ module bit_reverse_buffer #(
     // Natural Order Stream Output (AXI Compatible)
     output reg                   out_valid,
     output reg  [DATA_WIDTH-1:0] out_data,
-    output reg  [LOG2_N-1:0]     out_user,  // xk_index (0..1023)
-    output reg                   out_last   // tlast on index 1023
+    output reg  [LOG2_N-1:0]     out_user,  // xk_index (0..N-1)
+    output reg                   out_last   // tlast on index N-1
 );
 
-    // Bit reversal function
-    function [LOG2_N-1:0] bit_rev(input [LOG2_N-1:0] in);
+    // Active length based on cfg_nfft (default 1024 if cfg_nfft not in {6,8})
+    wire [3:0] eff_nfft = (cfg_nfft == 4'd6 || cfg_nfft == 4'd8) ? cfg_nfft : 4'd10;
+    wire [LOG2_N-1:0] cur_limit = (1 << eff_nfft) - 1;
+
+    // Bit reversal function parameterized by nfft
+    function [LOG2_N-1:0] bit_rev(input [LOG2_N-1:0] in, input [3:0] nfft);
         integer j;
         begin
-            for (j = 0; j < LOG2_N; j = j + 1)
-                bit_rev[j] = in[LOG2_N - 1 - j];
+            bit_rev = {LOG2_N{1'b0}};
+            for (j = 0; j < LOG2_N; j = j + 1) begin
+                if (j < nfft)
+                    bit_rev[nfft - 1 - j] = in[j];
+            end
         end
     endfunction
 
     // Two memory banks (Ping-Pong BRAM)
-    reg [DATA_WIDTH-1:0] ram_bank0 [0:N-1];
-    reg [DATA_WIDTH-1:0] ram_bank1 [0:N-1];
+    (* ram_style = "block" *) reg [DATA_WIDTH-1:0] ram_bank0 [0:N-1];
+    (* ram_style = "block" *) reg [DATA_WIDTH-1:0] ram_bank1 [0:N-1];
 
     integer mem_init_i;
     initial begin
@@ -54,9 +63,20 @@ module bit_reverse_buffer #(
     reg              active_rd_bank;
     reg              rd_en;
 
-    // Write logic
-    wire [LOG2_N-1:0] wr_addr = bit_rev(wr_cnt);
+    // Write address
+    wire [LOG2_N-1:0] wr_addr = bit_rev(wr_cnt, eff_nfft);
 
+    // Synchronous BRAM memory write (no async reset on RAM arrays)
+    always @(posedge clk) begin
+        if (clk_en && core_valid) begin
+            if (active_wr_bank == 1'b0)
+                ram_bank0[wr_addr] <= core_data;
+            else
+                ram_bank1[wr_addr] <= core_data;
+        end
+    end
+
+    // Write control logic
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             wr_cnt               <= {LOG2_N{1'b0}};
@@ -64,12 +84,7 @@ module bit_reverse_buffer #(
             first_frame_buffered <= 1'b0;
         end else if (clk_en) begin
             if (core_valid) begin
-                if (active_wr_bank == 1'b0)
-                    ram_bank0[wr_addr] <= core_data;
-                else
-                    ram_bank1[wr_addr] <= core_data;
-
-                if (wr_cnt == N - 1) begin
+                if (wr_cnt == cur_limit) begin
                     wr_cnt               <= {LOG2_N{1'b0}};
                     active_wr_bank       <= ~active_wr_bank;
                     first_frame_buffered <= 1'b1;
@@ -87,15 +102,15 @@ module bit_reverse_buffer #(
             active_rd_bank <= 1'b0;
             rd_en          <= 1'b0;
         end else if (clk_en) begin
-            if (core_valid && (wr_cnt == N - 1)) begin
+            if (core_valid && (wr_cnt == cur_limit)) begin
                 rd_en          <= 1'b1;
                 rd_cnt         <= {LOG2_N{1'b0}};
                 active_rd_bank <= active_wr_bank; // Read the bank that just completed writing
             end else if (rd_en) begin
-                if (rd_cnt == N - 1) begin
+                if (rd_cnt == cur_limit) begin
                     rd_cnt <= {LOG2_N{1'b0}};
                     // If no new frame arrived, hold off reading
-                    if (!(core_valid && (wr_cnt == N - 1)))
+                    if (!(core_valid && (wr_cnt == cur_limit)))
                         rd_en <= 1'b0;
                     else
                         active_rd_bank <= active_wr_bank;
@@ -118,7 +133,7 @@ module bit_reverse_buffer #(
             if (rd_en) begin
                 out_data <= (active_rd_bank == 1'b0) ? ram_bank0[rd_cnt] : ram_bank1[rd_cnt];
                 out_user <= rd_cnt;
-                out_last <= (rd_cnt == N - 1);
+                out_last <= (rd_cnt == cur_limit);
             end else begin
                 out_last <= 1'b0;
             end

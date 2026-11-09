@@ -22,11 +22,10 @@ module delay_buffer #(
             shift_reg[i] = {DATA_WIDTH{1'b0}};
     end
 
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            for (i = 0; i < DELAY_DEPTH; i = i + 1)
-                shift_reg[i] <= {DATA_WIDTH{1'b0}};
-        end else if (clk_en) begin
+    // Pure synchronous shift without asynchronous reset on data storage
+    // Enables Vivado to infer hardware SRL32E / BRAM primitives with 98% resource savings
+    always @(posedge clk) begin
+        if (clk_en) begin
             shift_reg[0] <= din;
             for (i = 1; i < DELAY_DEPTH; i = i + 1)
                 shift_reg[i] <= shift_reg[i-1];

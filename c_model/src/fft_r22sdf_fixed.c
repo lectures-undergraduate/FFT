@@ -22,8 +22,9 @@ void bit_reverse_reorder16(cplx16_t *data, int n) {
 
 // Stage-accurate Fixed-point 16-bit Radix-2^2 SDF C simulator
 void fft_r22sdf_fixed_simulate(const cplx16_t *in, cplx16_t *out, int n, uint16_t scale_sch, bool inverse) {
-    int log2_n = 10;
-    int num_pairs = log2_n / 2; // 5
+    int log2_n = 0;
+    while ((1 << log2_n) < n) log2_n++;
+    int num_pairs = log2_n / 2;
 
     // Working buffer
     cplx16_t *buf = (cplx16_t *)malloc(n * sizeof(cplx16_t));
@@ -107,7 +108,7 @@ void fft_r22sdf_fixed_simulate(const cplx16_t *in, cplx16_t *out, int n, uint16_
                     int w_mult = weights[b];
                     for (int i = 0; i < D2; i++) {
                         int idx = base + b * D2 + i;
-                        int tw_k = w_mult * i * (n / N_sub);
+                        int tw_k = (w_mult * i * 1024) / N_sub;
                         tw_k %= 1024;
 
                         if (tw_k == 0) {

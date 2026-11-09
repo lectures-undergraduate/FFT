@@ -3,13 +3,23 @@
 *.o
 *.obj
 
-# Vivado Simulator generated files
+# Vivado Simulator & Temporary Files
 xsim.dir/
 *.log
 *.jou
 *.pb
 *.wdb
 tr_db.log
+clockInfo.txt
+.Xil/
+ip_pack_proj/
 
 # Simulation temporary outputs
 rtl_output.hex
+
+# Vivado Bulky Intermediate Runs (keep only .srcs, .gen, .xpr)
+vivado_project/axi_fft_zynq.runs/
+vivado_project/axi_fft_zynq.cache/
+vivado_project/axi_fft_zynq.hw/
+vivado_project/axi_fft_zynq.ip_user_files/
+vivado_project/axi_fft_zynq.sim/

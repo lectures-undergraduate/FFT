@@ -2,7 +2,8 @@
 
 // Xilinx LogiCORE IP Fast Fourier Transform (v9.x) Compatible AXI Top
 // Architecture: Radix-2^2 Single-path Delay Feedback (R2^2SDF)
-// Pipelined Streaming I/O, 100% Continuous Throughput
+// Pipelined Streaming I/O, 100% Continuous Throughput, Zero Bubble
+// Supports Variable Transform Length: N in {64, 256, 1024}
 module axi_fft_top #(
     parameter N = 1024,
     parameter LOG2_N = 10
@@ -11,6 +12,9 @@ module axi_fft_top #(
     input  wire                  aresetn,
 
     // AXI4-Stream Config Channel (Slave)
+    // [0]: FWD_INV (1=FFT, 0=IFFT)
+    // [10:1]: SCALE_SCH (Scaling schedule)
+    // [15:11]: NFFT (6=64, 8=256, 10 or 0=1024)
     input  wire [15:0]           s_axis_config_tdata,
     input  wire                  s_axis_config_tvalid,
     output reg                   s_axis_config_tready,
@@ -23,7 +27,7 @@ module axi_fft_top #(
 
     // AXI4-Stream Data Output Channel (Master)
     output wire [31:0]           m_axis_data_tdata,
-    output wire [15:0]           m_axis_data_tuser,   // xk_index (0..1023)
+    output wire [15:0]           m_axis_data_tuser,   // xk_index (0..N-1)
     output wire                  m_axis_data_tvalid,
     input  wire                  m_axis_data_tready,
     output wire                  m_axis_data_tlast,
@@ -39,23 +43,33 @@ module axi_fft_top #(
     output reg                   event_data_in_channel_halt
 );
 
-    // Configuration Registers (Default: Forward FFT, full scaling schedule 0x3FF)
+    // Configuration Registers (Default: Forward FFT, full scaling schedule 0x3FF, N=1024)
     reg        cfg_fwd_inv;
     reg [9:0]  cfg_scale_sch;
+    reg [3:0]  cfg_nfft;
+
+    wire [4:0] cfg_nfft_raw = s_axis_config_tdata[15:11];
+    wire [3:0] cfg_nfft_dec = (cfg_nfft_raw == 5'd6) ? 4'd6 :
+                              (cfg_nfft_raw == 5'd8) ? 4'd8 : 4'd10;
 
     always @(posedge aclk or negedge aresetn) begin
         if (!aresetn) begin
-            cfg_fwd_inv          <= 1'b1;  // Forward FFT default
+            cfg_fwd_inv          <= 1'b1;    // Forward FFT default
             cfg_scale_sch        <= 10'h3FF; // Scale 1/2 at each stage default
+            cfg_nfft             <= 4'd10;   // Default 1024
             s_axis_config_tready <= 1'b1;
         end else begin
             s_axis_config_tready <= 1'b1;
             if (s_axis_config_tvalid && s_axis_config_tready) begin
                 cfg_fwd_inv   <= s_axis_config_tdata[0];
                 cfg_scale_sch <= s_axis_config_tdata[10:1];
+                cfg_nfft      <= cfg_nfft_dec;
             end
         end
     end
+
+    // Dynamic Frame Limit based on configured NFFT
+    wire [LOG2_N-1:0] cur_frame_limit = (1 << cfg_nfft) - 1;
 
     // Pipeline Clock Enable / Stall Control
     // The core progresses whenever the output skid buffer is ready to accept or not stalled
@@ -88,15 +102,15 @@ module axi_fft_top #(
                 if (in_sample_cnt == 0)
                     event_frame_started <= 1'b1;
 
-                if (in_sample_cnt < (N - 1)) begin
+                if (in_sample_cnt < cur_frame_limit) begin
                     if (s_axis_data_tlast)
                         event_tlast_unexpected <= 1'b1;
                     in_sample_cnt <= in_sample_cnt + 1'b1;
                 end else begin
-                    // 1023th sample
+                    // Last sample of frame
                     if (!s_axis_data_tlast)
                         event_tlast_missing <= 1'b1;
-                    in_sample_cnt <= {LOG2_N{1'b0}};
+                    in_sample_cnt        <= {LOG2_N{1'b0}};
                     m_axis_status_tdata  <= 8'h00; // No overflow
                     m_axis_status_tvalid <= 1'b1;
                 end
@@ -119,6 +133,7 @@ module axi_fft_top #(
         .clk_en    (pipeline_en),
         .fwd_inv   (cfg_fwd_inv),
         .scale_sch (cfg_scale_sch),
+        .cfg_nfft  (cfg_nfft),
         .din_valid (in_fire),
         .din_real  (din_real),
         .din_imag  (din_imag),
@@ -141,6 +156,7 @@ module axi_fft_top #(
         .clk       (aclk),
         .rst_n     (aresetn),
         .clk_en    (pipeline_en),
+        .cfg_nfft  (cfg_nfft),
         .core_valid(core_valid),
         .core_data ({core_imag, core_real}),
         .out_valid (rev_valid),

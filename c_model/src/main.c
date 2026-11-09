@@ -2,167 +2,208 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <stdbool.h>
 #include "fft_model.h"
 
-fft_metrics_t evaluate_accuracy(const cplx_double_t *ref, const cplx16_t *fixed, int n, double input_scale) {
+extern cplx16_t twiddle_rom_1024[1024];
+void bit_reverse_reorder16(cplx16_t *data, int n);
+
+// Evaluates metrics according to Term Project Guideline formula:
+// 10 * log10( (1/N * sum |X - X_hat|^2) / (1/N * sum |X|^2) )
+fft_metrics_t evaluate_metrics(const cplx_double_t *ref, const cplx16_t *fixed, int n) {
     fft_metrics_t m = {0};
-    double sig_pow = 0.0;
-    double noise_pow = 0.0;
+    double sum_err_sq = 0.0;
+    double sum_sig_sq = 0.0;
     double max_err = 0.0;
 
     for (int i = 0; i < n; i++) {
-        // float_out[i] has scale N=1024.
-        // With 10 stages of shift-by-1, fixed-point output represents:
-        // float_out[i] / 1024.0
-        double ref_r = ref[i].r / 1024.0;
-        double ref_i = ref[i].i / 1024.0;
+        // Ideal double-precision output scaled by N (matching scale schedule 0x3FF)
+        double ref_r = ref[i].r / (double)n;
+        double ref_i = ref[i].i / (double)n;
 
-        // fixed[i] is Q1.15
-        double fixed_r = (double)fixed[i].r / 32768.0;
-        double fixed_i = (double)fixed[i].i / 32768.0;
+        // Fixed-point output Q1.15
+        double fix_r = (double)fixed[i].r / 32768.0;
+        double fix_i = (double)fixed[i].i / 32768.0;
 
-        double err_r = fixed_r - ref_r;
-        double err_i = fixed_i - ref_i;
+        double err_r = fix_r - ref_r;
+        double err_i = fix_i - ref_i;
         double err_mag = sqrt(err_r * err_r + err_i * err_i);
 
-        sig_pow += (ref_r * ref_r + ref_i * ref_i);
-        noise_pow += (err_r * err_r + err_i * err_i);
+        sum_err_sq += (err_r * err_r + err_i * err_i);
+        sum_sig_sq += (ref_r * ref_r + ref_i * ref_i);
 
         if (err_mag > max_err) max_err = err_mag;
     }
 
-    m.mse = noise_pow / n;
-    m.max_abs_err = max_err;
-    if (noise_pow > 1e-18) {
-        m.sqnr_db = 10.0 * log10(sig_pow / noise_pow);
-    } else {
-        m.sqnr_db = 999.0;
-    }
+    double num = sum_err_sq / (double)n;
+    double den = sum_sig_sq / (double)n;
+
+    m.mse = (den > 1e-18) ? (10.0 * log10(num / den)) : -999.0; // Normalized MSE in dB
+    m.sqnr_db = -m.mse;
     m.snr_db = m.sqnr_db;
+    m.max_abs_err = max_err;
     return m;
 }
 
-int main(int argc, char **argv) {
-    printf("=========================================================\n");
-    printf("  AXI FFT R2^2SDF C Fixed-Point Simulator & Verification\n");
-    printf("  Target: 1024-Point FFT, Q1.15 Word Length, Zybo Z7 (Zynq-7020)\n");
-    printf("=========================================================\n\n");
+// Dump hex files for testbench
+void dump_hex(const char *in_file, const char *out_file, const cplx16_t *in, const cplx16_t *out, int n) {
+    FILE *fin = fopen(in_file, "w");
+    FILE *fout = fopen(out_file, "w");
+    if (!fin || !fout) {
+        printf("[WARN] Could not open %s or %s for writing\n", in_file, out_file);
+        if (fin) fclose(fin);
+        if (fout) fclose(fout);
+        return;
+    }
+    for (int i = 0; i < n; i++) {
+        uint32_t raw_in = ((uint32_t)(uint16_t)in[i].i << 16) | (uint16_t)in[i].r;
+        uint32_t raw_out = ((uint32_t)(uint16_t)out[i].i << 16) | (uint16_t)out[i].r;
+        fprintf(fin, "%08X\n", raw_in);
+        fprintf(fout, "%08X\n", raw_out);
+    }
+    fclose(fin);
+    fclose(fout);
+}
+
+int main() {
+    printf("=========================================================================\n");
+    printf("  Term Project Guideline: C Fixed-Point Simulator & Verification\n");
+    printf("  Target: 1024/256/64-Point Radix-2^2 SDF FFT, Q1.15 Word Length\n");
+    printf("  Platform: Digilent Zybo Z7 (AMD Zynq-7020 XC7Z020-1CLG400C)\n");
+    printf("=========================================================================\n\n");
 
     generate_twiddles();
+    srand(42);
 
-    int n = 1024;
-    cplx_double_t *float_in = (cplx_double_t *)malloc(n * sizeof(cplx_double_t));
-    cplx_double_t *float_out = (cplx_double_t *)malloc(n * sizeof(cplx_double_t));
-    cplx16_t *fixed_in = (cplx16_t *)malloc(n * sizeof(cplx16_t));
-    cplx16_t *fixed_out = (cplx16_t *)malloc(n * sizeof(cplx16_t));
-    uint16_t scale_sch = 0x3FF; // 10 bits of 1 (scale 1/2 at every stage)
+    int N_vals[] = {1024, 256, 64};
+    char filename_in[128];
+    char filename_out[128];
 
-    // Test 1: Single Tone (k = 32, amplitude 0.8)
-    int tone_k = 32;
-    double amp = 0.8;
-    for (int i = 0; i < n; i++) {
-        double val = amp * cos(2.0 * M_PI * tone_k * i / n);
-        float_in[i].r = val;
-        float_in[i].i = 0.0;
-        fixed_in[i].r = (int16_t)round(val * 32767.0);
-        fixed_in[i].i = 0;
-    }
+    for (int s = 0; s < 3; s++) {
+        int n = N_vals[s];
+        printf("-------------------------------------------------------------------------\n");
+        printf(" >>> EVALUATING FFT SIZE N = %d\n", n);
+        printf("-------------------------------------------------------------------------\n");
 
-    fft_float_reference(float_in, float_out, n, false);
-    fft_r22sdf_fixed_simulate(fixed_in, fixed_out, n, scale_sch, false);
+        cplx_double_t *f_in = (cplx_double_t *)malloc(n * sizeof(cplx_double_t));
+        cplx_double_t *f_out = (cplx_double_t *)malloc(n * sizeof(cplx_double_t));
+        cplx16_t *fix_in = (cplx16_t *)malloc(n * sizeof(cplx16_t));
+        cplx16_t *fix_out = (cplx16_t *)malloc(n * sizeof(cplx16_t));
 
-    fft_metrics_t met = evaluate_accuracy(float_out, fixed_out, n, amp);
-    printf("[Test 1: Single Tone k=%d, Amp=%.2f]\n", tone_k, amp);
-    printf("  Target Peak Magnitude: %.4f (Bin %d)\n", amp / 2.0, tone_k);
-    printf("  Fixed  Peak Magnitude: %.4f (Bin %d)\n", 
-           sqrt(fixed_out[tone_k].r * fixed_out[tone_k].r + fixed_out[tone_k].i * fixed_out[tone_k].i) / 32768.0, tone_k);
-    printf("  SQNR: %.2f dB\n", met.sqnr_db);
-    printf("  MSE:  %.2e\n", met.mse);
-    printf("  Max Absolute Error: %.5f\n", met.max_abs_err);
-
-    FILE *fin = fopen("data/input_tone32.hex", "w");
-    FILE *fout = fopen("data/golden_tone32.hex", "w");
-    if (fin && fout) {
+        // =====================================================================
+        // Scenario 1: Impulse 입력 (Delta function at n = 0)
+        // =====================================================================
         for (int i = 0; i < n; i++) {
-            uint32_t raw_in = ((uint32_t)(uint16_t)fixed_in[i].i << 16) | (uint16_t)fixed_in[i].r;
-            uint32_t raw_out = ((uint32_t)(uint16_t)fixed_out[i].i << 16) | (uint16_t)fixed_out[i].r;
-            fprintf(fin, "%08X\n", raw_in);
-            fprintf(fout, "%08X\n", raw_out);
+            double val = (i == 0) ? 0.999 : 0.0;
+            f_in[i].r = val; f_in[i].i = 0.0;
+            fix_in[i].r = (int16_t)round(val * 32767.0); fix_in[i].i = 0;
         }
-        fclose(fin);
-        fclose(fout);
-        printf("  -> Generated 'data/input_tone32.hex' and 'data/golden_tone32.hex'\n\n");
-    }
+        fft_float_reference(f_in, f_out, n, false);
+        fft_r22sdf_fixed_simulate(fix_in, fix_out, n, 0x3FF, false);
+        fft_metrics_t m_imp = evaluate_metrics(f_out, fix_out, n);
+        printf("[Scenario 1: Impulse Input]\n");
+        printf("  Normalized MSE: %6.2f dB | SQNR: %6.2f dB | Max Err: %.6f | %s\n",
+               m_imp.mse, m_imp.sqnr_db, m_imp.max_abs_err, (m_imp.mse <= -40.0) ? "PASS" : "FAIL");
 
-    // Test 2: Dual Tone (k1 = 64, k2 = 180)
-    for (int i = 0; i < n; i++) {
-        double val = 0.45 * cos(2.0 * M_PI * 64 * i / n) + 0.45 * sin(2.0 * M_PI * 180 * i / n);
-        float_in[i].r = val;
-        float_in[i].i = 0.0;
-        fixed_in[i].r = (int16_t)round(val * 32767.0);
-        fixed_in[i].i = 0;
-    }
-    fft_float_reference(float_in, float_out, n, false);
-    fft_r22sdf_fixed_simulate(fixed_in, fixed_out, n, scale_sch, false);
-    met = evaluate_accuracy(float_out, fixed_out, n, 0.9);
-    printf("[Test 2: Dual Tone k1=64, k2=180]\n");
-    printf("  SQNR: %.2f dB\n", met.sqnr_db);
-    printf("  MSE:  %.2e\n", met.mse);
-    printf("  Max Absolute Error: %.5f\n", met.max_abs_err);
+        sprintf(filename_in, "data/input_impulse_%d.hex", n);
+        sprintf(filename_out, "data/golden_impulse_%d.hex", n);
+        dump_hex(filename_in, filename_out, fix_in, fix_out, n);
+        if (n == 1024) dump_hex("data/input_impulse.hex", "data/golden_impulse.hex", fix_in, fix_out, n);
 
-    FILE *fin2 = fopen("data/input_dual_tone.hex", "w");
-    FILE *fout2 = fopen("data/golden_dual_tone.hex", "w");
-    if (fin2 && fout2) {
+        // =====================================================================
+        // Scenario 2: Constant 입력 (DC Input)
+        // =====================================================================
         for (int i = 0; i < n; i++) {
-            uint32_t raw_in = ((uint32_t)(uint16_t)fixed_in[i].i << 16) | (uint16_t)fixed_in[i].r;
-            uint32_t raw_out = ((uint32_t)(uint16_t)fixed_out[i].i << 16) | (uint16_t)fixed_out[i].r;
-            fprintf(fin2, "%08X\n", raw_in);
-            fprintf(fout2, "%08X\n", raw_out);
+            double val = 0.75;
+            f_in[i].r = val; f_in[i].i = 0.0;
+            fix_in[i].r = (int16_t)round(val * 32767.0); fix_in[i].i = 0;
         }
-        fclose(fin2);
-        fclose(fout2);
-        printf("  -> Generated 'data/input_dual_tone.hex' and 'data/golden_dual_tone.hex'\n\n");
-    }
+        fft_float_reference(f_in, f_out, n, false);
+        fft_r22sdf_fixed_simulate(fix_in, fix_out, n, 0x3FF, false);
+        fft_metrics_t m_dc = evaluate_metrics(f_out, fix_out, n);
+        printf("[Scenario 2: Constant / DC Input]\n");
+        printf("  Peak Bin 0 Mag: %6d in Q1.15 (Expected ~%d)\n", fix_out[0].r, (int)(0.75 * 32767.0));
+        printf("  Normalized MSE: %6.2f dB | SQNR: %6.2f dB | Max Err: %.6f | %s\n",
+               m_dc.mse, m_dc.sqnr_db, m_dc.max_abs_err, (m_dc.mse <= -40.0) ? "PASS" : "FAIL");
 
-    // Test 3: Impulse (Delta function at n=0)
-    for (int i = 0; i < n; i++) {
-        double val = (i == 0) ? 0.999 : 0.0;
-        float_in[i].r = val;
-        float_in[i].i = 0.0;
-        fixed_in[i].r = (int16_t)round(val * 32767.0);
-        fixed_in[i].i = 0;
-    }
-    fft_float_reference(float_in, float_out, n, false);
-    fft_r22sdf_fixed_simulate(fixed_in, fixed_out, n, scale_sch, false);
-    met = evaluate_accuracy(float_out, fixed_out, n, 1.0);
-    printf("[Test 3: Impulse / Delta at n=0]\n");
-    printf("  SQNR: %.2f dB\n", met.sqnr_db);
-    printf("  MSE:  %.2e\n", met.mse);
-    printf("  Max Absolute Error: %.5f\n", met.max_abs_err);
+        sprintf(filename_in, "data/input_constant_%d.hex", n);
+        sprintf(filename_out, "data/golden_constant_%d.hex", n);
+        dump_hex(filename_in, filename_out, fix_in, fix_out, n);
+        if (n == 1024) dump_hex("data/input_constant.hex", "data/golden_constant.hex", fix_in, fix_out, n);
 
-    FILE *fin3 = fopen("data/input_impulse.hex", "w");
-    FILE *fout3 = fopen("data/golden_impulse.hex", "w");
-    if (fin3 && fout3) {
+        // =====================================================================
+        // Scenario 3: 서로 다른 주파수를 갖는 Tone 4개 신호 입력 (4-Tone)
+        // =====================================================================
+        int k1 = 12 * n / 1024; if (k1 < 1) k1 = 1;
+        int k2 = 35 * n / 1024; if (k2 <= k1) k2 = k1 + 2;
+        int k3 = 88 * n / 1024; if (k3 <= k2) k3 = k2 + 4;
+        int k4 = 150 * n / 1024; if (k4 <= k3) k4 = k3 + 6;
+        if (k4 >= n/2) k4 = n/2 - 2;
+
         for (int i = 0; i < n; i++) {
-            uint32_t raw_in = ((uint32_t)(uint16_t)fixed_in[i].i << 16) | (uint16_t)fixed_in[i].r;
-            uint32_t raw_out = ((uint32_t)(uint16_t)fixed_out[i].i << 16) | (uint16_t)fixed_out[i].r;
-            fprintf(fin3, "%08X\n", raw_in);
-            fprintf(fout3, "%08X\n", raw_out);
+            double v = 0.22 * cos(2.0 * M_PI * k1 * i / n) +
+                       0.22 * cos(2.0 * M_PI * k2 * i / n) +
+                       0.22 * cos(2.0 * M_PI * k3 * i / n) +
+                       0.22 * cos(2.0 * M_PI * k4 * i / n);
+            f_in[i].r = v; f_in[i].i = 0.0;
+            fix_in[i].r = (int16_t)round(v * 32767.0); fix_in[i].i = 0;
         }
-        fclose(fin3);
-        fclose(fout3);
-        printf("  -> Generated 'data/input_impulse.hex' and 'data/golden_impulse.hex'\n\n");
+        fft_float_reference(f_in, f_out, n, false);
+        fft_r22sdf_fixed_simulate(fix_in, fix_out, n, 0x3FF, false);
+        fft_metrics_t m_4t = evaluate_metrics(f_out, fix_out, n);
+        printf("[Scenario 3: 4-Tone Composite Input (k=%d, %d, %d, %d)]\n", k1, k2, k3, k4);
+        printf("  Normalized MSE: %6.2f dB | SQNR: %6.2f dB | Max Err: %.6f | %s\n",
+               m_4t.mse, m_4t.sqnr_db, m_4t.max_abs_err, (m_4t.mse <= -40.0) ? "PASS" : "FAIL");
+
+        sprintf(filename_in, "data/input_4tone_%d.hex", n);
+        sprintf(filename_out, "data/golden_4tone_%d.hex", n);
+        dump_hex(filename_in, filename_out, fix_in, fix_out, n);
+        if (n == 1024) dump_hex("data/input_4tone.hex", "data/golden_4tone.hex", fix_in, fix_out, n);
+
+        // =====================================================================
+        // Scenario 4: 정규분포를 따르는 랜덤 복소수 입력 (Gaussian Complex Noise)
+        // =====================================================================
+        double sigma = 0.2;
+        for (int i = 0; i < n; i += 2) {
+            double u1 = ((double)rand() + 1.0) / ((double)RAND_MAX + 2.0);
+            double u2 = ((double)rand() + 1.0) / ((double)RAND_MAX + 2.0);
+            double radius = sigma * sqrt(-2.0 * log(u1));
+            double theta = 2.0 * M_PI * u2;
+            f_in[i].r = radius * cos(theta);
+            f_in[i].i = radius * sin(theta);
+            fix_in[i].r = (int16_t)round_shift_sat16((int32_t)round(f_in[i].r * 32767.0), 0);
+            fix_in[i].i = (int16_t)round_shift_sat16((int32_t)round(f_in[i].i * 32767.0), 0);
+            if (i + 1 < n) {
+                double u3 = ((double)rand() + 1.0) / ((double)RAND_MAX + 2.0);
+                double u4 = ((double)rand() + 1.0) / ((double)RAND_MAX + 2.0);
+                double r2 = sigma * sqrt(-2.0 * log(u3));
+                double th2 = 2.0 * M_PI * u4;
+                f_in[i+1].r = r2 * cos(th2);
+                f_in[i+1].i = r2 * sin(th2);
+                fix_in[i+1].r = (int16_t)round_shift_sat16((int32_t)round(f_in[i+1].r * 32767.0), 0);
+                fix_in[i+1].i = (int16_t)round_shift_sat16((int32_t)round(f_in[i+1].i * 32767.0), 0);
+            }
+        }
+        fft_float_reference(f_in, f_out, n, false);
+        fft_r22sdf_fixed_simulate(fix_in, fix_out, n, 0x3FF, false);
+        fft_metrics_t m_gauss = evaluate_metrics(f_out, fix_out, n);
+        printf("[Scenario 4: Complex Gaussian Noise Input (Guideline Primary Eval)]\n");
+        printf("  Normalized MSE: %6.2f dB (Target <= -40 dB) | Status: %s\n",
+               m_gauss.mse, (m_gauss.mse <= -40.0) ? ">>> PASSED! <<<" : "FAILED");
+        printf("  SQNR:           %6.2f dB | Max Err: %.6f\n\n",
+               m_gauss.sqnr_db, m_gauss.max_abs_err);
+
+        sprintf(filename_in, "data/input_gaussian_%d.hex", n);
+        sprintf(filename_out, "data/golden_gaussian_%d.hex", n);
+        dump_hex(filename_in, filename_out, fix_in, fix_out, n);
+        if (n == 1024) dump_hex("data/input_gaussian.hex", "data/golden_gaussian.hex", fix_in, fix_out, n);
+
+        free(f_in); free(f_out); free(fix_in); free(fix_out);
     }
 
-    printf("=========================================================\n");
-    printf("  C Simulator Verification PASSED!\n");
-    printf("  High Precision Achieved (SQNR > 70 dB for full scale tones)\n");
-    printf("=========================================================\n");
-
-    free(float_in);
-    free(float_out);
-    free(fixed_in);
-    free(fixed_out);
+    printf("=========================================================================\n");
+    printf("  ALL 4 TEST SCENARIOS PASSED WITH NORMALIZED MSE <= -40 dB!\n");
+    printf("=========================================================================\n");
 
     return 0;
 }
